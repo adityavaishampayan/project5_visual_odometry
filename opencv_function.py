@@ -5,13 +5,13 @@ Created on Thu May  2 19:24:30 2019
 
 @author: ishan
 """
- #=============================================================================
-import sys
-try:
-    sys.path.remove('/opt/ros/kinetic/lib/python2.7/dist-packages')
-except:
-    pass
- #=============================================================================
+# =============================================================================
+# import sys,os
+# try:
+#     sys.path.remove('/opt/ros/kinetic/lib/python2.7/dist-packages')
+# except:
+#     pass
+# =============================================================================
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -67,7 +67,13 @@ def get_R_T(F):
     R2 = np.dot(U,np.dot(W,V))
     R3 = np.dot(U,np.dot(W.T,V))
     R4 = np.dot(U,np.dot(W.T,V))
-
+# =============================================================================
+#     R1 = U * W * V
+#     R2 = U * W * V
+#     R3 = U * W.T * V
+#     R4 = U * W.T * V
+# =============================================================================
+    
     if np.linalg.det(R1)<0:
             R1 = -R1
             t1 = -t1
@@ -107,6 +113,25 @@ def tri_pts(x1,x2,P1,P2):
 
 x_plot = []
 z_plot = []
+# =============================================================================
+# 
+# cap = cv2.VideoCapture('road.avi')
+# while(True):
+#     # Capture frame-by-frame
+#     ret, frame1 = cap.read()
+#     ret, frame2 = cap.read()
+# =============================================================================
+    
+
+# =============================================================================
+# path = Path(__file__).parent
+# path /= "Oxford_dataset/stereo/centre/*.png"
+# for f in path.iterdir():
+#     print(f)    # <--- type: <class 'pathlib.PosixPath'>
+#     f = str(f)  # <--- convert to string
+#     img=cv2.imread(f)
+# 
+# =============================================================================
    
     
 car = glob.glob("Oxford_dataset/stereo/centre/*.png")
@@ -122,8 +147,13 @@ current_pos = np.zeros((3, 1))
 current_rot = np.eye(3)
 while a < (len(car_images) - 1):
     
+# for i in range(len(car_images)):    
+    #imageRaw1 = cv2.imread(images[i], cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
+    #rgb1 = cv2.cvtColor(imageRaw1, cv2.COLOR_BAYER_GR2BGR)
     rgb1 = cv2.cvtColor(car_images[a], cv2.COLOR_BAYER_GR2BGR)
  
+    #imageRaw2 = cv2.imread(frame2, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
+    #rgb2 = cv2.cvtColor(imageRaw2, cv2.COLOR_BAYER_GR2BGR)
     rgb2 = cv2.cvtColor(car_images[a + 1], cv2.COLOR_BAYER_GR2BGR)
     
     fx, fy, cx, cy, G_camera_image1, LUT1 = ReadCameraModel('Oxford_dataset/model')
@@ -141,38 +171,123 @@ while a < (len(car_images) - 1):
     
     
     K = np.array([[fx, 0, cx],[0, fy, cy],[0, 0, 1]]) 
-    
-    feature_detector = cv2.FastFeatureDetector_create(threshold=25,
-                                                      nonmaxSuppression=True)
 
-    lk_params = dict(winSize=(21, 21),
-                     criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.03))    
+    # Initiate STAR detector
+    orb = cv2.ORB_create()
+    kp1, des1 = orb.detectAndCompute(eqimage1,None)
+    kp2, des2 = orb.detectAndCompute(eqimage2,None)
     
-    
-    keypoint = feature_detector.detect(eqimage1, None)
-    pts1 = np.array(list(map(lambda x: [x.pt], keypoint)),dtype=np.float32)
-    
-    pts2, st, err = cv2.calcOpticalFlowPyrLK(eqimage1,eqimage2, pts1,None, **lk_params) 
-    
+    # create BFMatcher object
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    # Match descriptors.
+    matches = bf.match(des1,des2)
+    # Sort them in the order of their distance.
+    matches = sorted(matches, key = lambda x:x.distance)
+
+    good_points = []
+    for match in matches:
+        good_points.append(match)
+        
+    pts1 = np.float32([kp1[match.queryIdx].pt for match in good_points])
+    pts2 = np.float32([kp2[match.trainIdx].pt for match in good_points])
+
     E,mask = cv2.findEssentialMat(pts2, pts1, K, cv2.FM_RANSAC, 0.999, 1.0, None)
     #pts1 = pts1[mask.ravel()==1]
     #pts2 = pts2[mask.ravel()==1]
-    _, R, t, mask = cv2.recoverPose(E, pts2, pts1, K)
+    points, R, t, mask = cv2.recoverPose(E, pts2, pts1, K)
+    
+# =============================================================================
+#     s = 0.0
+#     count = 0
+#     for i in range(len(pts2) - 1):
+#         for j in range(i+1,len(pts2)):
+#             s = np.norm(pts2[i] - pts2[j]) / np.norm(pts1[i] - pts1[j])
+#             
+#             s += s
+#             count += 1
+#     s /= count        
+#     
+# =============================================================================
+    
+# =============================================================================
+#     P1 = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0]])
+#     P2 = get_R_T(F)
+#     
+#     indices = 0
+#     max_res = 0
+#     for i in range(4):
+#         X = tri_pts(pts1.T,pts2.T,P1,P2[i])
+#         d1 = np.dot(P1,X)[2]
+#         d2 = np.dot(P2[i],X)[2]
+#         if np.sum(d1>0) + np.sum(d2>0) > max_res:
+#             max_res = np.sum(d1>0) + np.sum(d2>0)
+#             indices = i
+#             infront = (d1>0) & (d2>0)
+#             
+#     X = tri_pts(pts1.T,pts2.T,P1,P2[indices])        
+#     #print(np.dot(P2[indices],X[:,infront])[2])
+#     
+#     
+#     
+#     P = P2[indices]
+# =============================================================================
+# =============================================================================
+#     Rot = P[:3,:3]
+#     print(Rot)
+#     Trans = P[:3,3]
+#     print(Trans)
+#     current_pos += current_rot.dot(Trans) 
+#     current_rot = np.dot(Rot,current_rot)
+# =============================================================================
     
     current_pos += current_rot.dot(t) 
     current_rot = R.dot(current_rot)
-   
+    #print('cp',current_pos)
+# =============================================================================
+#     x1 = P[0,3]
+#     z1 = P[2,3]
+#     #print(P)
+#     
+#     N[:3,:] = P2[indices]
+#     N[3,:] = [0,0,0,1]
+#     
+#     
+#     h = np.dot(h,N)
+#     x = h[0,3]
+#     z = h[2,3]
+# =============================================================================
+    #print(h)
+    
     x_plot.append(current_pos[0,0])
-    z_plot.append(-current_pos[2,0])
-
+    z_plot.append(current_pos[2,0])
+    
+# =============================================================================
+#     x_plot.append(-x)
+#     z_plot.append(z)
+# =============================================================================
+    
+    print(a)
     a+= 1
 
+# =============================================================================
+# x_plot = np.array(x_plot).reshape(x_plot.shape[0],-1)
+# z_plot = np.array(z_plot).reshape(z_plot.shape[0],-1)
+# final_array = np.vstack((x_plot,z_plot))
+# 
+# =============================================================================
 final_array = []
 for i in range(len(x_plot)):
     final_array.append((x_plot[i],z_plot[i]))
 #print(final_array)
-plt.scatter(z_plot, x_plot)
+plt.scatter(x_plot,z_plot)
 plt.show()
 
 
-   
+    
+  
+    
+# =============================================================================
+#     if cv2.waitKey(0) & 0xFF == ord('q'):
+#         break
+# 
+# =============================================================================
